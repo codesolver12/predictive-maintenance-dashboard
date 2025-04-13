@@ -1,5 +1,3 @@
-# dashboard.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,7 +5,6 @@ import plotly.express as px
 from sklearn.ensemble import IsolationForest
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-from transformers import pipeline
 
 st.set_page_config(page_title="Predictive Maintenance AI Dashboard", layout="wide")
 st.title("🚀 AI-Powered Predictive Maintenance Dashboard")
@@ -55,64 +52,57 @@ if uploaded_file:
     if target_col:
         sequence_length = 10
         data = df[target_col].fillna(method='ffill').values
-        X, y = [], []
-        for i in range(len(data) - sequence_length):
-            X.append(data[i:i + sequence_length])
-            y.append(data[i + sequence_length])
-        X, y = np.array(X), np.array(y)
-        X = X.reshape((X.shape[0], X.shape[1], 1))
 
-        lstm_model = Sequential([
-            LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
-            Dense(1)
-        ])
-        lstm_model.compile(optimizer='adam', loss='mse')
-        lstm_model.fit(X, y, epochs=10, verbose=0)
+        if len(data) > sequence_length + 10:
+            X, y = [], []
+            for i in range(len(data) - sequence_length):
+                X.append(data[i:i + sequence_length])
+                y.append(data[i + sequence_length])
+            X, y = np.array(X), np.array(y)
+            X = X.reshape((X.shape[0], X.shape[1], 1))
 
-        future = lstm_model.predict(X[-10:].reshape(1, sequence_length, 1))
-        st.write(f"🧭 Predicted future {target_col}: {future[0][0]:.2f}")
+            lstm_model = Sequential([
+                LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
+                Dense(1)
+            ])
+            lstm_model.compile(optimizer='adam', loss='mse')
+            lstm_model.fit(X, y, epochs=10, verbose=0)
 
-    # AI Diagnosis & Solutions
+            last_sequence = data[-sequence_length:].reshape(1, sequence_length, 1)
+            future = lstm_model.predict(last_sequence)
+            st.write(f"🧭 Predicted future {target_col}: {future[0][0]:.2f}")
+        else:
+            st.warning("📉 Not enough data points for future prediction. Please upload a longer dataset.")
+
+    # Diagnosis with fallback AI or rule-based suggestion
     st.subheader("🧠 AI Diagnosis & Solutions")
-    description = st.text_input("Describe the issue or anomaly (e.g., high vibration, low voltage, etc.):")
-
+    description = st.text_input("Describe the issue or anomaly:")
     if st.button("Generate Solution"):
+        context = f"Sensor features: {', '.join(numerical_cols)}. Anomaly Description: {description}"
         try:
-            # Refined expert-style prompt
-            prompt = f"""
-            You are an expert in predictive maintenance and diagnostics for industrial machines.
-            Based on the following sensor anomaly description, provide a clear, actionable maintenance solution.
-
-            Issue Description: {description}
-
-            Include the most likely root cause and what a maintenance engineer should do.
-            """
-
+            from transformers import pipeline
             ai_model = pipeline("text2text-generation", model="google/flan-t5-small")
-            response = ai_model(prompt, max_length=150)[0]['generated_text']
-
-            if "not sure" in response or len(response.strip()) < 20:
-                raise ValueError("Generic or unclear response.")
-
+            prompt = f"Suggest a maintenance solution for the following issue in a sensor system:\n{context}"
+            response = ai_model(prompt, max_length=100)[0]['generated_text']
             st.success("🩺 Suggested Solution:")
             st.write(response)
-
         except Exception as e:
-            st.warning("⚠️ AI model not available or gave a generic result. Using rule-based solution.")
+            st.warning("⚠️ AI model not supported in current environment. Using rule-based fallback.")
             fallback = {
-                "temperature": "Overheating detected. Check for clogged vents, broken fans, or high ambient temperatures.",
-                "vibration": "Abnormal vibrations. Inspect bearings, alignment, and unbalanced rotating parts.",
-                "voltage": "Voltage fluctuation. Examine power input, wiring integrity, and circuit protection.",
-                "pressure": "Pressure anomaly. Inspect valves, pumps, or leakages in the system.",
-                "current": "Current spike detected. Possible motor overload or short circuit.",
-                "speed": "Speed inconsistency. Check motor drives, belts, or control signals.",
-                "default": "Perform full system diagnostic. Inspect logs, signals, and historical trends for root cause."
+                "temperature": "Check cooling systems and ventilation.",
+                "vibration": "Inspect mechanical joints, consider re-balancing components.",
+                "voltage": "Inspect electrical supply and possible short circuits.",
+                "pressure": "Check for leaks or faulty pressure valves.",
+                "current": "Check current sensors and system load balance.",
+                "default": "Perform general diagnostics and inspect system logs."
             }
-
+            found = False
             for keyword, advice in fallback.items():
                 if keyword.lower() in description.lower():
                     st.success("🩺 Suggested Solution:")
                     st.write(advice)
+                    found = True
                     break
-            else:
+            if not found:
                 st.write(fallback["default"])
+
