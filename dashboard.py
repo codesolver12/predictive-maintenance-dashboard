@@ -1,3 +1,5 @@
+# dashboard.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,6 +7,8 @@ import plotly.express as px
 from sklearn.ensemble import IsolationForest
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
+from transformers import pipeline
+import io
 
 st.set_page_config(page_title="Predictive Maintenance AI Dashboard", layout="wide")
 st.title("🚀 AI-Powered Predictive Maintenance Dashboard")
@@ -22,6 +26,7 @@ if uploaded_file:
     if time_col != "None":
         df[time_col] = pd.to_datetime(df[time_col])
         df = df.sort_values(by=time_col)
+        df.set_index(time_col, inplace=True)
 
     # Auto Detection
     st.subheader("📊 Dataset Summary & Feature Detection")
@@ -49,40 +54,52 @@ if uploaded_file:
     # LSTM Failure Prediction
     st.subheader("🔮 Predict Future Failures")
     target_col = st.selectbox("Select feature to predict future trends:", numerical_cols)
+    steps_ahead = st.slider("Forecast how many future steps?", min_value=1, max_value=50, value=10)
+
     if target_col:
         sequence_length = 10
         data = df[target_col].fillna(method='ffill').values
+        X, y = [], []
+        for i in range(len(data) - sequence_length):
+            X.append(data[i:i + sequence_length])
+            y.append(data[i + sequence_length])
+        X, y = np.array(X), np.array(y)
 
-        if len(data) > sequence_length + 10:
-            X, y = [], []
-            for i in range(len(data) - sequence_length):
-                X.append(data[i:i + sequence_length])
-                y.append(data[i + sequence_length])
-            X, y = np.array(X), np.array(y)
-            X = X.reshape((X.shape[0], X.shape[1], 1))
+        X = X.reshape((X.shape[0], X.shape[1], 1))
 
-            lstm_model = Sequential([
-                LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
-                Dense(1)
-            ])
-            lstm_model.compile(optimizer='adam', loss='mse')
-            lstm_model.fit(X, y, epochs=10, verbose=0)
+        lstm_model = Sequential([
+            LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
+            Dense(1)
+        ])
+        lstm_model.compile(optimizer='adam', loss='mse')
+        lstm_model.fit(X, y, epochs=10, verbose=0)
 
-            last_sequence = data[-sequence_length:].reshape(1, sequence_length, 1)
-            future = lstm_model.predict(last_sequence)
-            st.write(f"🧭 Predicted future {target_col}: {future[0][0]:.2f}")
-        else:
-            st.warning("📉 Not enough data points for future prediction. Please upload a longer dataset.")
+        last_seq = data[-sequence_length:]
+        forecast = []
 
-    # Diagnosis with fallback AI or rule-based suggestion
+        for _ in range(steps_ahead):
+            input_seq = last_seq.reshape((1, sequence_length, 1))
+            next_val = lstm_model.predict(input_seq, verbose=0)[0][0]
+            forecast.append(next_val)
+            last_seq = np.append(last_seq[1:], next_val)
+
+        future_df = pd.DataFrame({f"Predicted {target_col}": forecast})
+
+        st.line_chart(future_df, use_container_width=True)
+        st.write("📉 Forecasted Values:")
+        st.dataframe(future_df)
+
+        # Download forecast
+        csv = future_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Predictions as CSV", csv, f"forecast_{target_col}.csv", "text/csv")
+
+    # AI Diagnosis & Solutions
     st.subheader("🧠 AI Diagnosis & Solutions")
     description = st.text_input("Describe the issue or anomaly:")
     if st.button("Generate Solution"):
-        context = f"Sensor features: {', '.join(numerical_cols)}. Anomaly Description: {description}"
         try:
-            from transformers import pipeline
             ai_model = pipeline("text2text-generation", model="google/flan-t5-small")
-            prompt = f"Suggest a maintenance solution for the following issue in a sensor system:\n{context}"
+            prompt = f"Suggest a realistic predictive maintenance solution for the following issue: {description}"
             response = ai_model(prompt, max_length=100)[0]['generated_text']
             st.success("🩺 Suggested Solution:")
             st.write(response)
@@ -92,17 +109,12 @@ if uploaded_file:
                 "temperature": "Check cooling systems and ventilation.",
                 "vibration": "Inspect mechanical joints, consider re-balancing components.",
                 "voltage": "Inspect electrical supply and possible short circuits.",
-                "pressure": "Check for leaks or faulty pressure valves.",
-                "current": "Check current sensors and system load balance.",
                 "default": "Perform general diagnostics and inspect system logs."
             }
-            found = False
             for keyword, advice in fallback.items():
                 if keyword.lower() in description.lower():
                     st.success("🩺 Suggested Solution:")
                     st.write(advice)
-                    found = True
                     break
-            if not found:
+            else:
                 st.write(fallback["default"])
-
