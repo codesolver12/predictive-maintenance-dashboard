@@ -1,9 +1,8 @@
 streamlit
 pandas
 numpy
-scikit-learn
-tensorflow
 plotly
-transformers==4.37.0
-torch
-
+tensorflow
+scikit-learn
+transformers==4.36.2
+torch==2.0.1
