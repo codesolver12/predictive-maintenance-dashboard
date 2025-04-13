@@ -8,7 +8,7 @@ from sklearn.ensemble import IsolationForest
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from transformers import pipeline
-import io
+from io import BytesIO
 
 st.set_page_config(page_title="Predictive Maintenance AI Dashboard", layout="wide")
 st.title("🚀 AI-Powered Predictive Maintenance Dashboard")
@@ -26,7 +26,7 @@ if uploaded_file:
     if time_col != "None":
         df[time_col] = pd.to_datetime(df[time_col])
         df = df.sort_values(by=time_col)
-        df.set_index(time_col, inplace=True)
+        df = df.set_index(time_col)
 
     # Auto Detection
     st.subheader("📊 Dataset Summary & Feature Detection")
@@ -51,65 +51,80 @@ if uploaded_file:
         st.dataframe(df[df['anomaly'] == -1])
         st.write("📌 Total Anomalies Detected:", sum(df['anomaly'] == -1))
 
-    # LSTM Failure Prediction
+    # LSTM Failure Prediction with Multiple-step Forecast and Plot
     st.subheader("🔮 Predict Future Failures")
     target_col = st.selectbox("Select feature to predict future trends:", numerical_cols)
-    steps_ahead = st.slider("Forecast how many future steps?", min_value=1, max_value=50, value=10)
-
     if target_col:
         sequence_length = 10
+        forecast_steps = st.slider("Select number of future steps to predict:", 1, 20, 5)
+
         data = df[target_col].fillna(method='ffill').values
         X, y = [], []
         for i in range(len(data) - sequence_length):
             X.append(data[i:i + sequence_length])
             y.append(data[i + sequence_length])
         X, y = np.array(X), np.array(y)
+        if len(X) > 0:
+            X = X.reshape((X.shape[0], X.shape[1], 1))
 
-        X = X.reshape((X.shape[0], X.shape[1], 1))
+            lstm_model = Sequential([
+                LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
+                Dense(1)
+            ])
+            lstm_model.compile(optimizer='adam', loss='mse')
+            lstm_model.fit(X, y, epochs=10, verbose=0)
 
-        lstm_model = Sequential([
-            LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
-            Dense(1)
-        ])
-        lstm_model.compile(optimizer='adam', loss='mse')
-        lstm_model.fit(X, y, epochs=10, verbose=0)
+            input_seq = data[-sequence_length:]
+            predictions = []
+            for _ in range(forecast_steps):
+                seq_input = input_seq.reshape((1, sequence_length, 1))
+                pred = lstm_model.predict(seq_input, verbose=0)[0][0]
+                predictions.append(pred)
+                input_seq = np.append(input_seq[1:], pred)
 
-        last_seq = data[-sequence_length:]
-        forecast = []
+            st.write(f"🧭 Predicted future {target_col} values:")
+            st.write(predictions)
 
-        for _ in range(steps_ahead):
-            input_seq = last_seq.reshape((1, sequence_length, 1))
-            next_val = lstm_model.predict(input_seq, verbose=0)[0][0]
-            forecast.append(next_val)
-            last_seq = np.append(last_seq[1:], next_val)
+            # Plot predictions with actual data
+            past = data[-50:]
+            future_index = range(len(past), len(past) + forecast_steps)
+            all_data = np.concatenate([past, predictions])
+            fig2 = px.line(y=all_data, labels={'x': 'Time Index', 'y': target_col}, title="Trend Prediction")
+            fig2.add_scatter(y=past, mode='lines', name='Actual')
+            fig2.add_scatter(y=predictions, x=future_index, mode='lines', name='Predicted')
+            st.plotly_chart(fig2)
 
-        future_df = pd.DataFrame({f"Predicted {target_col}": forecast})
+            # Save predictions
+            if st.button("💾 Export Predictions as CSV"):
+                output_df = pd.DataFrame({
+                    'Step': list(range(1, forecast_steps + 1)),
+                    f'Predicted_{target_col}': predictions
+                })
+                csv = output_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f'predicted_{target_col}.csv',
+                    mime='text/csv',
+                )
 
-        st.line_chart(future_df, use_container_width=True)
-        st.write("📉 Forecasted Values:")
-        st.dataframe(future_df)
-
-        # Download forecast
-        csv = future_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Predictions as CSV", csv, f"forecast_{target_col}.csv", "text/csv")
-
-    # AI Diagnosis & Solutions
+    # Diagnosis with fallback AI or rule-based suggestion
     st.subheader("🧠 AI Diagnosis & Solutions")
     description = st.text_input("Describe the issue or anomaly:")
     if st.button("Generate Solution"):
         try:
             ai_model = pipeline("text2text-generation", model="google/flan-t5-small")
-            prompt = f"Suggest a realistic predictive maintenance solution for the following issue: {description}"
+            prompt = f"Suggest a realistic and technical predictive maintenance solution for: {description}"
             response = ai_model(prompt, max_length=100)[0]['generated_text']
             st.success("🩺 Suggested Solution:")
             st.write(response)
-        except Exception as e:
-            st.warning("⚠️ AI model not supported in current environment. Using rule-based fallback.")
+        except Exception:
+            # Simple fallback if transformer fails
             fallback = {
-                "temperature": "Check cooling systems and ventilation.",
-                "vibration": "Inspect mechanical joints, consider re-balancing components.",
-                "voltage": "Inspect electrical supply and possible short circuits.",
-                "default": "Perform general diagnostics and inspect system logs."
+                "temperature": "Check cooling systems and ensure proper ventilation around sensors.",
+                "vibration": "Inspect bearings, motors, and mounting parts for looseness or wear.",
+                "voltage": "Examine power supply stability, grounding, and wiring connections.",
+                "default": "Perform general diagnostics, verify sensor calibration, and inspect recent logs."
             }
             for keyword, advice in fallback.items():
                 if keyword.lower() in description.lower():
