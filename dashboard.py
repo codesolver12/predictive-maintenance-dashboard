@@ -8,7 +8,6 @@ from sklearn.ensemble import IsolationForest
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from transformers import pipeline
-from io import BytesIO
 
 st.set_page_config(page_title="Predictive Maintenance AI Dashboard", layout="wide")
 st.title("🚀 AI-Powered Predictive Maintenance Dashboard")
@@ -85,13 +84,17 @@ if uploaded_file:
             st.write(f"🧭 Predicted future {target_col} values:")
             st.write(predictions)
 
-            # Plot predictions with actual data
+            # Plot actual + predicted values
             past = data[-50:]
-            future_index = range(len(past), len(past) + forecast_steps)
             all_data = np.concatenate([past, predictions])
-            fig2 = px.line(y=all_data, labels={'x': 'Time Index', 'y': target_col}, title="Trend Prediction")
-            fig2.add_scatter(y=past, mode='lines', name='Actual')
-            fig2.add_scatter(y=predictions, x=future_index, mode='lines', name='Predicted')
+            past_index = list(range(len(past)))
+            future_index = list(range(len(past), len(past) + forecast_steps))
+
+            import plotly.graph_objects as go
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(y=past, x=past_index, mode='lines', name='Actual'))
+            fig2.add_trace(go.Scatter(y=predictions, x=future_index, mode='lines', name='Predicted'))
+            fig2.update_layout(title="📉 Trend Forecasting", xaxis_title="Index", yaxis_title=target_col)
             st.plotly_chart(fig2)
 
             # Save predictions
