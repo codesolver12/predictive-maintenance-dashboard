@@ -73,12 +73,30 @@ if uploaded_file:
         future = lstm_model.predict(X[-10:].reshape(1, sequence_length, 1))
         st.write(f"🧭 Predicted future {target_col}: {future[0][0]:.2f}")
 
-    # Diagnosis with Free AI (Hugging Face)
-    st.subheader("🧠 AI Diagnosis & Solutions")
-    description = st.text_input("Describe the issue or anomaly:")
-    if st.button("Generate Solution"):
-        ai_model = pipeline("text2text-generation", model="google/flan-t5-base")
-        prompt = f"Suggest a solution for the following sensor issue: {description}"
+   # Diagnosis with fallback AI or rule-based suggestion
+st.subheader("🧠 AI Diagnosis & Solutions")
+description = st.text_input("Describe the issue or anomaly:")
+if st.button("Generate Solution"):
+    try:
+        from transformers import pipeline
+        ai_model = pipeline("text2text-generation", model="google/flan-t5-small")
+        prompt = f"Suggest a maintenance solution for the following issue: {description}"
         response = ai_model(prompt, max_length=100)[0]['generated_text']
         st.success("🩺 Suggested Solution:")
         st.write(response)
+    except Exception as e:
+        # Simple fallback if transformer fails
+        st.warning("⚠️ AI model not supported in current environment. Using rule-based fallback.")
+        fallback = {
+            "temperature": "Check cooling systems and ventilation.",
+            "vibration": "Inspect mechanical joints, consider re-balancing components.",
+            "voltage": "Inspect electrical supply and possible short circuits.",
+            "default": "Perform general diagnostics and inspect system logs."
+        }
+        for keyword, advice in fallback.items():
+            if keyword.lower() in description.lower():
+                st.success("🩺 Suggested Solution:")
+                st.write(advice)
+                break
+        else:
+            st.write(fallback["default"])
