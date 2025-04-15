@@ -37,24 +37,12 @@ if uploaded_file:
     numerical_cols = df.select_dtypes(include=np.number).columns.tolist()
     st.write("Detected numerical features:", numerical_cols)
 
-    # Sensor Trend Visualization with Enhanced Options
+    # Sensor Trend Visualization
     st.subheader("📈 Visualize Sensor Trends")
     selected_feature = st.selectbox("Choose a feature to visualize:", numerical_cols)
-    chart_type = st.selectbox("Choose chart type:", ["Line", "Scatter", "Bar", "Box", "Histogram"])
-
     fig = go.Figure()
-    if chart_type == "Line":
-        fig.add_trace(go.Scatter(x=df[time_col], y=df[selected_feature], mode="lines", name="Line"))
-    elif chart_type == "Scatter":
-        fig.add_trace(go.Scatter(x=df[time_col], y=df[selected_feature], mode="markers", name="Scatter"))
-    elif chart_type == "Bar":
-        fig.add_trace(go.Bar(x=df[time_col], y=df[selected_feature], name="Bar"))
-    elif chart_type == "Box":
-        fig = go.Figure(data=[go.Box(y=df[selected_feature], name=selected_feature)])
-    elif chart_type == "Histogram":
-        fig = go.Figure(data=[go.Histogram(x=df[selected_feature], name=selected_feature)])
-
-    fig.update_layout(title=f"{chart_type} Plot of {selected_feature}", xaxis_title="Time", yaxis_title=selected_feature)
+    fig.add_trace(go.Scatter(x=df[time_col], y=df[selected_feature], mode="lines", name="Sensor Data"))
+    fig.update_layout(title=f"{selected_feature} Over Time", xaxis_title="Time", yaxis_title=selected_feature)
     st.plotly_chart(fig, use_container_width=True)
 
     # Anomaly Detection
@@ -68,15 +56,14 @@ if uploaded_file:
         st.write("📌 Total Anomalies Detected:", len(anomaly_points))
 
         # Anomaly Overlay on Chart
-        if chart_type in ["Line", "Scatter", "Bar"]:
-            fig.add_trace(go.Scatter(
-                x=anomaly_points[time_col],
-                y=anomaly_points[selected_feature],
-                mode="markers",
-                name="Anomalies",
-                marker=dict(color="red", size=6)
-            ))
-            st.plotly_chart(fig, use_container_width=True)
+        fig.add_trace(go.Scatter(
+            x=anomaly_points[time_col],
+            y=anomaly_points[selected_feature],
+            mode="markers",
+            name="Anomalies",
+            marker=dict(color="red", size=6)
+        ))
+        st.plotly_chart(fig, use_container_width=True)
 
         # Export anomalies
         st.download_button("📤 Download Anomalies CSV", anomaly_points.to_csv(index=False),
@@ -100,6 +87,7 @@ if uploaded_file:
     if len(X) == 0:
         st.warning("⚠️ Not enough data for prediction. Please upload a longer dataset.")
     else:
+        # LSTM Model
         model = Sequential([
             LSTM(64, activation='relu', input_shape=(sequence_length, 1)),
             Dense(n_steps)
@@ -136,7 +124,7 @@ if uploaded_file:
             response = ai_model(prompt, max_new_tokens=100)[0]['generated_text']
             st.success("🩺 Suggested AI-Based Solution:")
             st.write(response.strip())
-        except Exception:
+        except Exception as e:
             st.warning("⚠️ AI model not supported or failed. Using fallback solution.")
             fallback = {
                 "temperature": "Check cooling systems, thermal paste, and ambient environment.",
@@ -145,11 +133,12 @@ if uploaded_file:
                 "pressure": "Inspect valves and sensor calibration.",
                 "default": "Run general diagnostics and inspect historical logs for anomalies."
             }
+            matched = False
             for key, val in fallback.items():
                 if key in description.lower():
                     st.success("🩺 Suggested Fallback Solution:")
                     st.write(val)
+                    matched = True
                     break
-            else:
+            if not matched:
                 st.write(fallback["default"])
-
