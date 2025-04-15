@@ -1,5 +1,7 @@
+# dashboard.py
+
 import os
-os.environ["STREAMLIT_WATCH_FILE"] = "false"  # Prevent file watcher torch issues
+os.environ["STREAMLIT_WATCH_FILE"] = "false"
 
 import streamlit as st
 import pandas as pd
@@ -22,11 +24,12 @@ if uploaded_file:
     st.write("Preview:")
     st.dataframe(df.head())
 
-    # Timestamp Handling
+    # Handle Timestamps
     time_col = st.selectbox("Select timestamp column (if any):", options=["None"] + list(df.columns))
     if time_col != "None":
         df[time_col] = pd.to_datetime(df[time_col])
-        df = df.sort_values(by=time_col).reset_index(drop=True)
+        df = df.sort_values(by=time_col)
+        df = df.reset_index(drop=True)
     else:
         df["index_time"] = range(len(df))
         time_col = "index_time"
@@ -37,7 +40,7 @@ if uploaded_file:
     numerical_cols = df.select_dtypes(include=np.number).columns.tolist()
     st.write("Detected numerical features:", numerical_cols)
 
-    # Sensor Trend Visualization
+    # Visualize Trends
     st.subheader("📈 Visualize Sensor Trends")
     selected_feature = st.selectbox("Choose a feature to visualize:", numerical_cols)
     fig = go.Figure()
@@ -45,36 +48,45 @@ if uploaded_file:
     fig.update_layout(title=f"{selected_feature} Over Time", xaxis_title="Time", yaxis_title=selected_feature)
     st.plotly_chart(fig, use_container_width=True)
 
+    # 🔍 Data Analytics & Advanced Plotting
+    st.subheader("📊 Data Analytics & Plotting")
+
+    plot_type = st.selectbox("Select Plot Type", ["Line", "Scatter", "Histogram", "Box", "Bar"])
+    x_axis = st.selectbox("Select X-axis", df.columns)
+    y_axis = st.selectbox("Select Y-axis", numerical_cols)
+
+    plot_fig = go.Figure()
+
+    if plot_type == "Line":
+        plot_fig.add_trace(go.Scatter(x=df[x_axis], y=df[y_axis], mode="lines", name="Line Plot"))
+    elif plot_type == "Scatter":
+        plot_fig.add_trace(go.Scatter(x=df[x_axis], y=df[y_axis], mode="markers", name="Scatter Plot"))
+    elif plot_type == "Histogram":
+        plot_fig.add_trace(go.Histogram(x=df[y_axis], name="Histogram"))
+    elif plot_type == "Box":
+        plot_fig.add_trace(go.Box(y=df[y_axis], name="Box Plot"))
+    elif plot_type == "Bar":
+        grouped = df.groupby(df[x_axis])[y_axis].mean().reset_index()
+        plot_fig.add_trace(go.Bar(x=grouped[x_axis], y=grouped[y_axis], name="Bar Plot"))
+
+    plot_fig.update_layout(title=f"{plot_type} of {y_axis} vs {x_axis}", xaxis_title=x_axis, yaxis_title=y_axis)
+    st.plotly_chart(plot_fig, use_container_width=True)
+
     # Anomaly Detection
     st.subheader("⚠️ Anomaly Detection using Isolation Forest")
     if len(numerical_cols) > 1:
         model = IsolationForest(contamination=0.05, random_state=42)
         df['anomaly'] = model.fit_predict(df[numerical_cols])
-        anomaly_points = df[df['anomaly'] == -1]
         st.write("Detected anomalies (-1):")
-        st.dataframe(anomaly_points)
-        st.write("📌 Total Anomalies Detected:", len(anomaly_points))
+        st.dataframe(df[df['anomaly'] == -1])
+        st.write("📌 Total Anomalies Detected:", sum(df['anomaly'] == -1))
 
-        # Anomaly Overlay on Chart
-        fig.add_trace(go.Scatter(
-            x=anomaly_points[time_col],
-            y=anomaly_points[selected_feature],
-            mode="markers",
-            name="Anomalies",
-            marker=dict(color="red", size=6)
-        ))
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Export anomalies
-        st.download_button("📤 Download Anomalies CSV", anomaly_points.to_csv(index=False),
-                           file_name="anomalies.csv", mime="text/csv")
-
-    # Forecasting
+    # Predictive Modeling
     st.subheader("🔮 Multi-step LSTM Failure Forecasting")
     forecast_col = st.selectbox("Select feature for prediction:", numerical_cols)
     n_steps = st.slider("Select number of future steps to forecast:", 1, 20, 5)
 
-    data = df[forecast_col].ffill().values
+    data = df[forecast_col].fillna(method='ffill').values
     sequence_length = 10
 
     X, y = [], []
@@ -84,10 +96,7 @@ if uploaded_file:
     X, y = np.array(X), np.array(y)
     X = X.reshape((X.shape[0], X.shape[1], 1))
 
-    if len(X) == 0:
-        st.warning("⚠️ Not enough data for prediction. Please upload a longer dataset.")
-    else:
-        # LSTM Model
+    if len(X) > 0:
         model = Sequential([
             LSTM(64, activation='relu', input_shape=(sequence_length, 1)),
             Dense(n_steps)
@@ -116,16 +125,15 @@ if uploaded_file:
     # AI Diagnosis
     st.subheader("🧠 AI Diagnosis & Solutions")
     description = st.text_area("Describe the issue or anomaly:", placeholder="Example: sudden temperature rise and frequent vibration")
-
     if st.button("Generate AI Solution"):
         try:
             ai_model = pipeline("text-generation", model="gpt2")
-            prompt = f"Sensor Feature: {forecast_col}\nAnomaly Description: {description}\nSuggest a detailed predictive maintenance solution:"
+            prompt = f"Suggest a predictive maintenance solution for the following anomaly: {description}"
             response = ai_model(prompt, max_new_tokens=100)[0]['generated_text']
             st.success("🩺 Suggested AI-Based Solution:")
             st.write(response.strip())
         except Exception as e:
-            st.warning("⚠️ AI model not supported or failed. Using fallback solution.")
+            st.warning("⚠️ AI model not supported or failed. Using fallback.")
             fallback = {
                 "temperature": "Check cooling systems, thermal paste, and ambient environment.",
                 "vibration": "Inspect rotating parts and mounting bolts. Consider rebalancing.",
@@ -133,12 +141,10 @@ if uploaded_file:
                 "pressure": "Inspect valves and sensor calibration.",
                 "default": "Run general diagnostics and inspect historical logs for anomalies."
             }
-            matched = False
             for key, val in fallback.items():
                 if key in description.lower():
                     st.success("🩺 Suggested Fallback Solution:")
                     st.write(val)
-                    matched = True
                     break
-            if not matched:
+            else:
                 st.write(fallback["default"])
