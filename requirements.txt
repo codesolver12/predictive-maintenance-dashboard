@@ -7,4 +7,3 @@ tensorflow==2.15.0
 plotly==5.21.0
 transformers==4.40.0
 torch>=2.1.2
-pip install -r requirements.txt
